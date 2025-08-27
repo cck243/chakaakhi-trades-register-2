@@ -2,9 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Sales & Purchase — Fixed</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sales & Purchase Pro</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- jsPDF and html2canvas for PDF generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     :root {
       --accent: #2b7a78; --muted: #6b7280; --border: #e5e7eb; --bg: #f9fafb;
@@ -14,7 +17,7 @@
       --accent: #14a8a5; --muted: #9ca3af; --border: #374151; --bg: #111827;
       --card-bg: #1f2937; --text: #f3f4f6; --shadow: rgba(0, 0, 0, 0.2);
     }
-    body { font-family: 'Inter', system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--text); transition: background 0.3s ease; }
+    body { font-family: 'Inter', system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--text); transition: background 0.3s ease; font-size: 14px; }
     header { background: var(--accent); color: white; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
     header h1 { font-size: 18px; font-weight: 600; margin: 0; }
     .wrap { display: flex; gap: 16px; padding: 16px; align-items: flex-start; }
@@ -29,8 +32,10 @@
     input, select, textarea, button { font-family: inherit; font-size: 14px; }
     input, select, textarea { padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%; box-sizing: border-box; }
     input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
-    button.btn { padding: 10px 14px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; }
-    button.primary { background: var(--accent); color: white; } button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); } button.danger { background: #ef4444; color: white; }
+    button.btn { padding: 10px 14px; border-radius: 8px; border: none; cursor: pointer; font-weight: 500; transition: background 0.2s; }
+    button.primary { background: var(--accent); color: white; } button.primary:hover { background: #3aa19f; }
+    button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); } button.ghost:hover { background: var(--bg); }
+    button.danger { background: #ef4444; color: white; } button.danger:hover { background: #f87171; }
     table { width: 100%; border-collapse: collapse; margin-top: 16px; }
     th, td { padding: 10px; border-bottom: 1px solid var(--border); text-align: left; font-size: 14px; }
     th { background: var(--bg); font-weight: 600; }
@@ -40,13 +45,27 @@
     .toast.show { opacity: 1; transform: translateY(0); }
     footer { padding: 16px; text-align: center; color: var(--muted); font-size: 13px; }
     .theme-toggle { background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+    .invoice-view { padding: 24px; }
+    .invoice-header { display: flex; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 20px; }
+    .invoice-header div { flex: 1; min-width: 200px; }
+    .invoice-header h3 { margin: 0 0 8px 0; color: var(--accent); }
+    .invoice-header p { margin: 0; line-height: 1.6; }
+    .invoice-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 0; }
     @media (max-width: 880px) { .wrap { flex-direction: column; } nav { width: 100%; } }
+    @media (max-width: 600px) {
+        body { font-size: 13px; }
+        .row { flex-direction: column; gap: 8px; margin-bottom: 12px; }
+        .row > div { width: 100% !important; }
+        .invoice-actions { flex-direction: column; }
+        .invoice-actions .btn { width: 100%; }
+        header h1 { font-size: 16px; }
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>Sales & Purchase Management</h1>
-    <button class="theme-toggle" onclick="toggleTheme()">🌙 / ☀️</button>
+    <h1>Sales & Purchase Pro</h1>
+    <button class="theme-toggle" onclick="toggleTheme()">� / ☀️</button>
   </header>
 
   <div class="wrap">
@@ -59,6 +78,7 @@
       <button data-tab="purchases">Purchase Bills</button>
       <button data-tab="payments">Payments & Receipts</button>
       <button data-tab="reports">Reports & Export</button>
+      <button data-tab="settings">Settings</button>
     </nav>
     <main id="main"></main>
   </div>
@@ -67,6 +87,7 @@
   <div id="toast" class="toast"></div>
 
   <script>
+    const { jsPDF } = window.jspdf;
     const main = document.getElementById('main');
     const nav = document.getElementById('nav');
 
@@ -74,10 +95,11 @@
     const uid = (p = 'id') => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const fmt = n => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
     const today = () => new Date().toISOString().slice(0, 10);
-    const LS_KEYS = ['products', 'customers', 'suppliers', 'sales', 'purchases', 'payments'];
+    const LS_KEYS = ['products', 'customers', 'suppliers', 'sales', 'purchases', 'payments', 'companyDetails'];
 
-    function load(key) { try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; } }
-    function save(key, arr) { localStorage.setItem(key, JSON.stringify(arr || [])); }
+    function load(key) { try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return key === 'companyDetails' ? {} : []; } }
+    function save(key, data) { localStorage.setItem(key, JSON.stringify(data || (key === 'companyDetails' ? {} : []))); }
+    function getSetting(key) { const settings = load('companyDetails'); return settings[key] || ''; }
     function showToast(msg) {
         const toast = document.getElementById('toast');
         toast.textContent = msg;
@@ -98,7 +120,7 @@
             { id: uid('p'), sku: 'P-002', name: 'Widget B', category: 'General', price: 200, cost: 140, stock: 30, unit: 'pcs', minStock: 5 }
         ]);
         if (!load('customers').length) save('customers', [{ id: uid('c'), name: 'Walk-in Customer', phone: '', email: '' }]);
-        LS_KEYS.forEach(k => { if (!localStorage.getItem(k)) save(k, []); });
+        LS_KEYS.forEach(k => { if (!localStorage.getItem(k)) save(k, k === 'companyDetails' ? {} : []); });
     }
 
     // ========== NAVIGATION & ROUTING ==========
@@ -119,10 +141,13 @@
             suppliers: renderSuppliers,
             sales: renderSales,
             new_sale: renderSaleForm,
+            view_sale: renderSaleView,
             purchases: renderPurchases,
             new_purchase: renderPurchaseForm,
+            view_purchase: renderPurchaseView,
             payments: renderPayments,
             reports: renderReports,
+            settings: renderSettings,
         }[tab];
         if (renderer) renderer(data, id);
     }
@@ -167,12 +192,14 @@
             </div>
             <div class="card">
                 <h3>All ${opts.title}</h3>
+                <div style="overflow-x:auto;">
                 <table>
                     <thead><tr>${opts.headers.map(h => `<th>${h}</th>`).join('')}<th>Actions</th></tr></thead>
                     <tbody>${items.map(it => `<tr>${opts.row(it).map(td => `<td>${td}</td>`).join('')}
                         <td><button class="btn ghost small" onclick="editItem('${opts.key}', '${it.id}')">Edit</button> <button class="btn danger small" onclick="deleteItem('${opts.key}', '${it.id}')">Del</button></td>
                     </tr>`).join('')}</tbody>
                 </table>
+                </div>
             </div>`;
 
         document.getElementById('crud-form').onsubmit = e => {
@@ -245,28 +272,33 @@
           <button class="btn primary" onclick="render('new_sale')">New Invoice</button>
         </div>
         <div class="card">
+          <div style="overflow-x:auto;">
           <table>
-            <thead><tr><th>Date</th><th>Invoice #</th><th>Customer</th><th class="right">Total</th><th class="right">Due</th></tr></thead>
+            <thead><tr><th>Date</th><th>Invoice #</th><th>Customer</th><th class="right">Total</th><th class="right">Due</th><th>Actions</th></tr></thead>
             <tbody>
               ${sales.map(s => {
                 const cust = customers.find(c => c.id === s.customerId)?.name || 'N/A';
                 const due = (s.total || 0) - (s.paid || 0);
-                return `<tr>
+                return `<tr style="cursor:pointer;" onclick="render('view_sale', '${s.id}')">
                   <td>${s.date}</td>
                   <td>${s.invoice}</td>
                   <td>${cust}</td>
                   <td class="right">₹ ${fmt(s.total)}</td>
-                  <td class="right" style="color:${due > 0 ? '#ef4444' : 'inherit'}">₹ ${fmt(due)}</td>
+                  <td class="right" style="color:${due > 0.01 ? '#ef4444' : 'inherit'}">₹ ${fmt(due)}</td>
+                  <td onclick="event.stopPropagation()"><button class="btn ghost small" onclick="render('new_sale', '${s.id}')">Edit</button></td>
                 </tr>`
               }).join('')}
             </tbody>
           </table>
+          </div>
         </div>`;
     }
     
     // ========== RENDER: NEW/EDIT SALE FORM ==========
     function renderSaleForm({ products, customers }, saleId) {
-        let sale = saleId ? load('sales').find(s => s.id === saleId) : null;
+        const allSales = load('sales');
+        let sale = saleId ? allSales.find(s => s.id === saleId) : null;
+        const originalSale = sale ? JSON.parse(JSON.stringify(sale)) : null; // Deep copy for stock calculation
         if (!sale) sale = { id: '', date: today(), invoice: `INV-${Date.now()}`, customerId: '', items: [], total: 0, paid: 0 };
 
         main.innerHTML = `
@@ -288,10 +320,12 @@
                     <div style="flex:1"><label>Price (₹)</label><input id="item-price" type="number" step="0.01"></div>
                     <div style="margin-top:21px;"><button type="button" class="btn primary" id="add-item-btn">Add</button></div>
                 </div>
+                <div style="overflow-x:auto;">
                 <table id="sale-items-table">
                     <thead><tr><th>Product</th><th class="right">Qty</th><th class="right">Price</th><th class="right">Amount</th><th></th></tr></thead>
                     <tbody></tbody>
                 </table>
+                </div>
             </div>
             <div class="card row" style="justify-content: flex-end;">
                 <div style="width:250px;">
@@ -354,7 +388,6 @@
         document.getElementById('amount-paid').oninput = updateTotals;
 
         document.getElementById('save-sale-btn').onclick = () => {
-            const sales = load('sales');
             const prods = load('products');
             const formData = new FormData(document.getElementById('sale-form'));
             const newSale = {
@@ -367,21 +400,42 @@
                 paid: Number(document.getElementById('amount-paid').value)
             };
 
-            // Update stock
+            // --- CRITICAL: Stock Update Logic ---
+            // 1. If editing, revert stock from the original sale
+            if (originalSale) {
+                originalSale.items.forEach(item => {
+                    const pIndex = prods.findIndex(p => p.id === item.productId);
+                    if (pIndex > -1) prods[pIndex].stock = (prods[pIndex].stock || 0) + item.qty;
+                });
+            }
+            // 2. Apply stock changes for the new/updated sale
             newSale.items.forEach(item => {
                 const pIndex = prods.findIndex(p => p.id === item.productId);
-                if (pIndex > -1) prods[pIndex].stock = (prods[pIndex].stock || 0) - item.qty;
+                if (pIndex > -1) {
+                    if (prods[pIndex].stock < item.qty) {
+                       showToast(`Not enough stock for ${prods[pIndex].name}. Available: ${prods[pIndex].stock}`);
+                       // Re-add the reverted stock if transaction fails
+                       if(originalSale) {
+                           originalSale.items.forEach(revertItem => {
+                               const pIdx = prods.findIndex(p => p.id === revertItem.productId);
+                               if (pIdx > -1) prods[pIdx].stock = (prods[pIdx].stock || 0) - revertItem.qty;
+                           });
+                       }
+                       return; // Stop execution
+                    }
+                    prods[pIndex].stock -= item.qty;
+                }
             });
             save('products', prods);
             
             if (sale.id) { // update existing
-                save('sales', sales.map(s => s.id === sale.id ? newSale : s));
+                save('sales', allSales.map(s => s.id === sale.id ? newSale : s));
             } else { // add new
-                sales.unshift(newSale);
-                save('sales', sales);
+                allSales.unshift(newSale);
+                save('sales', allSales);
             }
             showToast('Sale saved!');
-            render('sales');
+            render('view_sale', newSale.id);
         };
         renderItems();
     }
@@ -394,19 +448,23 @@
           <button class="btn primary" onclick="render('new_purchase')">New Bill</button>
         </div>
         <div class="card">
+          <div style="overflow-x:auto;">
           <table>
-            <thead><tr><th>Date</th><th>Bill #</th><th>Supplier</th><th class="right">Total</th><th class="right">Due</th></tr></thead>
+            <thead><tr><th>Date</th><th>Bill #</th><th>Supplier</th><th class="right">Total</th><th class="right">Due</th><th>Actions</th></tr></thead>
             <tbody>${purchases.map(p => {
                 const sup = suppliers.find(s => s.id === p.supplierId)?.name || 'N/A';
                 const due = (p.total || 0) - (p.paid || 0);
-                return `<tr><td>${p.date}</td><td>${p.bill}</td><td>${sup}</td><td class="right">₹ ${fmt(p.total)}</td><td class="right" style="color:${due > 0 ? '#ef4444' : 'inherit'}">₹ ${fmt(due)}</td></tr>`
+                return `<tr style="cursor:pointer;" onclick="render('view_purchase', '${p.id}')"><td>${p.date}</td><td>${p.bill}</td><td>${sup}</td><td class="right">₹ ${fmt(p.total)}</td><td class="right" style="color:${due > 0.01 ? '#ef4444' : 'inherit'}">₹ ${fmt(due)}</td><td onclick="event.stopPropagation()"><button class="btn ghost small" onclick="render('new_purchase', '${p.id}')">Edit</button></td></tr>`
             }).join('')}</tbody>
           </table>
+          </div>
         </div>`;
     }
     
     function renderPurchaseForm({ products, suppliers }, purchaseId) {
-        let p = purchaseId ? load('purchases').find(p => p.id === purchaseId) : null;
+        const allPurchases = load('purchases');
+        let p = purchaseId ? allPurchases.find(p => p.id === purchaseId) : null;
+        const originalPurchase = p ? JSON.parse(JSON.stringify(p)) : null;
         if (!p) p = { id: '', date: today(), bill: `BILL-${Date.now()}`, supplierId: '', items: [], total: 0, paid: 0 };
 
         main.innerHTML = `
@@ -428,7 +486,9 @@
                     <div style="flex:1"><label>Cost (₹)</label><input id="item-cost" type="number" step="0.01"></div>
                     <div style="margin-top:21px;"><button type="button" class="btn primary" id="add-item-btn">Add</button></div>
                 </div>
+                <div style="overflow-x:auto;">
                 <table id="purchase-items-table"><thead><tr><th>Product</th><th class="right">Qty</th><th class="right">Cost</th><th class="right">Amount</th><th></th></tr></thead><tbody></tbody></table>
+                </div>
             </div>
             <div class="card row" style="justify-content: flex-end;">
                  <div style="width:250px;">
@@ -468,7 +528,6 @@
         };
         
         document.getElementById('save-purchase-btn').onclick = () => {
-            const purchases = load('purchases');
             const prods = load('products');
             const formData = new FormData(document.getElementById('purchase-form'));
             const newPurchase = {
@@ -479,19 +538,150 @@
                 paid: Number(document.getElementById('amount-paid').value)
             };
 
-            // CRITICAL: Update stock on purchase
+            // --- CRITICAL: Stock Update Logic for Purchases ---
+            if (originalPurchase) {
+                originalPurchase.items.forEach(item => {
+                    const pIndex = prods.findIndex(p => p.id === item.productId);
+                    if (pIndex > -1) prods[pIndex].stock = (prods[pIndex].stock || 0) - item.qty;
+                });
+            }
             newPurchase.items.forEach(item => {
                 const pIndex = prods.findIndex(p => p.id === item.productId);
                 if (pIndex > -1) prods[pIndex].stock = Number(prods[pIndex].stock || 0) + item.qty;
             });
             save('products', prods);
             
-            save('purchases', p.id ? purchases.map(pu => pu.id === p.id ? newPurchase : pu) : [newPurchase, ...purchases]);
+            save('purchases', p.id ? allPurchases.map(pu => pu.id === p.id ? newPurchase : pu) : [newPurchase, ...allPurchases]);
             showToast('Purchase saved!');
-            render('purchases');
+            render('view_purchase', newPurchase.id);
         };
         renderItems();
     }
+
+    // ========== RENDER: INVOICE/BILL VIEW & PDF EXPORT ==========
+    function renderSaleView({ sales, customers, products }, saleId) {
+        const sale = sales.find(s => s.id === saleId);
+        if (!sale) { main.innerHTML = '<h2>Invoice not found</h2>'; return; }
+        const customer = customers.find(c => c.id === sale.customerId) || {};
+        const due = (sale.total || 0) - (sale.paid || 0);
+
+        main.innerHTML = `
+            <div class="invoice-actions">
+                <button class="btn ghost" onclick="render('sales')">Back to Sales</button>
+                <button class="btn ghost" onclick="render('new_sale', '${saleId}')">Edit</button>
+                <button class="btn primary" onclick="printInvoice('${saleId}')">Print / Save PDF</button>
+            </div>
+            <div id="invoice-content" class="invoice-view">
+                <div class="invoice-header">
+                    <div>
+                        <h3>From:</h3>
+                        <p><strong>${getSetting('companyName') || 'Your Company'}</strong><br>
+                        ${getSetting('companyAddress')?.replace(/\n/g, '<br>') || 'Your Address'}</p>
+                    </div>
+                    <div>
+                        <h3>To:</h3>
+                        <p><strong>${customer.name || 'N/A'}</strong><br>
+                        ${customer.phone || ''}<br>${customer.email || ''}</p>
+                    </div>
+                    <div>
+                        <h3>Invoice Details</h3>
+                        <p><strong>Invoice #:</strong> ${sale.invoice}<br>
+                        <strong>Date:</strong> ${sale.date}</p>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                <table>
+                    <thead><tr><th>Item</th><th class="right">Qty</th><th class="right">Price</th><th class="right">Total</th></tr></thead>
+                    <tbody>
+                        ${sale.items.map(item => {
+                            const p = products.find(pr => pr.id === item.productId);
+                            return `<tr>
+                                <td>${p ? p.name : 'N/A'}</td>
+                                <td class="right">${item.qty}</td>
+                                <td class="right">₹ ${fmt(item.price)}</td>
+                                <td class="right">₹ ${fmt(item.qty * item.price)}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                    <tfoot>
+                        <tr><td colspan="3" class="right bold">Total</td><td class="right bold">₹ ${fmt(sale.total)}</td></tr>
+                        <tr><td colspan="3" class="right">Paid</td><td class="right">₹ ${fmt(sale.paid)}</td></tr>
+                        <tr><td colspan="3" class="right bold">Amount Due</td><td class="right bold">₹ ${fmt(due)}</td></tr>
+                    </tfoot>
+                </table>
+                </div>
+            </div>`;
+    }
+
+    function renderPurchaseView({ purchases, suppliers, products }, purchaseId) {
+        const purchase = purchases.find(p => p.id === purchaseId);
+        if (!purchase) { main.innerHTML = '<h2>Bill not found</h2>'; return; }
+        const supplier = suppliers.find(s => s.id === purchase.supplierId) || {};
+        const due = (purchase.total || 0) - (purchase.paid || 0);
+
+        main.innerHTML = `
+            <div class="invoice-actions">
+                <button class="btn ghost" onclick="render('purchases')">Back to Purchases</button>
+                <button class="btn ghost" onclick="render('new_purchase', '${purchaseId}')">Edit</button>
+            </div>
+            <div id="bill-content" class="invoice-view">
+                 <div class="invoice-header">
+                    <div>
+                        <h3>From (Supplier):</h3>
+                        <p><strong>${supplier.name || 'N/A'}</strong><br>
+                        ${supplier.phone || ''}<br>${supplier.email || ''}</p>
+                    </div>
+                    <div>
+                        <h3>To (Billed To):</h3>
+                        <p><strong>${getSetting('companyName') || 'Your Company'}</strong><br>
+                        ${getSetting('companyAddress')?.replace(/\n/g, '<br>') || 'Your Address'}</p>
+                    </div>
+                    <div>
+                        <h3>Bill Details</h3>
+                        <p><strong>Bill #:</strong> ${purchase.bill}<br>
+                        <strong>Date:</strong> ${purchase.date}</p>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                <table>
+                    <thead><tr><th>Item</th><th class="right">Qty</th><th class="right">Cost</th><th class="right">Total</th></tr></thead>
+                    <tbody>
+                        ${purchase.items.map(item => {
+                            const p = products.find(pr => pr.id === item.productId);
+                            return `<tr>
+                                <td>${p ? p.name : 'N/A'}</td>
+                                <td class="right">${item.qty}</td>
+                                <td class="right">₹ ${fmt(item.cost)}</td>
+                                <td class="right">₹ ${fmt(item.qty * item.cost)}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                    <tfoot>
+                        <tr><td colspan="3" class="right bold">Total</td><td class="right bold">₹ ${fmt(purchase.total)}</td></tr>
+                        <tr><td colspan="3" class="right">Paid</td><td class="right">₹ ${fmt(purchase.paid)}</td></tr>
+                        <tr><td colspan="3" class="right bold">Amount Due</td><td class="right bold">₹ ${fmt(due)}</td></tr>
+                    </tfoot>
+                </table>
+                </div>
+            </div>
+        `;
+    }
+
+    window.printInvoice = (saleId) => {
+        const invoiceElement = document.getElementById('invoice-content');
+        const sale = load('sales').find(s => s.id === saleId);
+        if (!invoiceElement || !sale) return;
+
+        showToast('Generating PDF...');
+        html2canvas(invoiceElement).then(canvas => {
+            const imgData = canvas.toDataURL('image/png');
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+            pdf.save(`Invoice-${sale.invoice}.pdf`);
+        });
+    };
     
     // ========== RENDER: PAYMENTS & RECEIPTS ==========
     function renderPayments({ payments, sales, purchases, customers, suppliers }) {
@@ -511,6 +701,7 @@
         </div>
         <div class="card">
           <h3>All Transactions</h3>
+          <div style="overflow-x:auto;">
           <table>
             <thead><tr><th>Date</th><th>Type</th><th>Reference</th><th class="right">Amount</th><th>Method</th></tr></thead>
             <tbody>${payments.map(pm => {
@@ -527,6 +718,7 @@
                 return `<tr><td>${pm.date}</td><td>${pm.type}</td><td>${refLabel}</td><td class="right">₹ ${fmt(pm.amount)}</td><td>${pm.method}</td></tr>`;
             }).join('')}</tbody>
           </table>
+          </div>
         </div>`;
     
       const refSel = document.getElementById('pt-ref');
@@ -568,9 +760,18 @@
     }
     
     // ========== RENDER: REPORTS & EXPORT ==========
-    function renderReports() {
+    function renderReports({ sales, customers }) {
         main.innerHTML = `
             <h2>Reports & Data Management</h2>
+            <div class="card">
+                <h3>Sales Report</h3>
+                <div class="row">
+                    <div style="flex:1"><label>Start Date</label><input type="date" id="start-date" value="${new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().slice(0,10)}"></div>
+                    <div style="flex:1"><label>End Date</label><input type="date" id="end-date" value="${today()}"></div>
+                    <div style="align-self:flex-end;"><button class="btn primary" id="run-report">Run Report</button></div>
+                </div>
+                <div id="report-output" style="margin-top:16px;"></div>
+            </div>
             <div class="card">
                 <h3>Export Data</h3>
                 <p class="small">Download all your data (products, sales, etc.) into a single JSON file for backup.</p>
@@ -583,6 +784,24 @@
                 <button class="btn danger" id="import-btn" style="margin-top:8px;">Import and Overwrite</button>
             </div>`;
     
+        document.getElementById('run-report').onclick = () => {
+            const start = document.getElementById('start-date').value;
+            const end = document.getElementById('end-date').value;
+            const filteredSales = sales.filter(s => s.date >= start && s.date <= end);
+            
+            let total = 0, paid = 0;
+            let reportHTML = `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Invoice</th><th>Customer</th><th class="right">Total</th><th class="right">Paid</th><th class="right">Due</th></tr></thead><tbody>`;
+            filteredSales.forEach(s => {
+                const cust = customers.find(c => c.id === s.customerId)?.name || 'N/A';
+                const due = (s.total || 0) - (s.paid || 0);
+                total += s.total || 0;
+                paid += s.paid || 0;
+                reportHTML += `<tr><td>${s.date}</td><td>${s.invoice}</td><td>${cust}</td><td class="right">₹ ${fmt(s.total)}</td><td class="right">₹ ${fmt(s.paid)}</td><td class="right">₹ ${fmt(due)}</td></tr>`;
+            });
+            reportHTML += `</tbody><tfoot><tr class="bold"><td>Totals</td><td></td><td></td><td class="right">₹ ${fmt(total)}</td><td class="right">₹ ${fmt(paid)}</td><td class="right">₹ ${fmt(total - paid)}</td></tr></tfoot></table></div>`;
+            document.getElementById('report-output').innerHTML = reportHTML;
+        };
+
         document.getElementById('export-btn').onclick = () => {
             const data = LS_KEYS.reduce((acc, k) => ({ ...acc, [k]: load(k) }), {});
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -606,7 +825,7 @@
                     const data = JSON.parse(e.target.result);
                     let imported = 0;
                     for (const key of LS_KEYS) {
-                        if (data[key] && Array.isArray(data[key])) {
+                        if (data[key]) {
                             save(key, data[key]);
                             imported++;
                         }
@@ -622,6 +841,38 @@
                 }
             };
             reader.readAsText(fileInput.files[0]);
+        };
+    }
+
+    // ========== RENDER: SETTINGS ==========
+    function renderSettings() {
+        const details = load('companyDetails');
+        main.innerHTML = `
+            <h2>Settings</h2>
+            <div class="card">
+                <h3>Company Details</h3>
+                <p class="small">This information will appear on your invoices.</p>
+                <form id="settings-form">
+                    <div class="row">
+                        <div style="flex:1;"><label>Company Name</label><input name="companyName" value="${details.companyName || ''}"></div>
+                    </div>
+                    <div class="row">
+                        <div style="flex:1;"><label>Address</label><textarea name="companyAddress" rows="4">${details.companyAddress || ''}</textarea></div>
+                    </div>
+                    <div class="row" style="justify-content:flex-end; margin-top:16px;">
+                      <button type="submit" class="btn primary">Save Settings</button>
+                    </div>
+                </form>
+            </div>
+        `;
+
+        document.getElementById('settings-form').onsubmit = e => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const newDetails = Object.fromEntries(formData.entries());
+            save('companyDetails', newDetails);
+            showToast('Settings saved!');
+            render('settings');
         };
     }
 
