@@ -80,16 +80,31 @@
 <section id="payments">
   <h2>Payments & Receipts</h2>
   <form id="paymentForm">
+    <label>Customer:</label>
     <select id="paymentCustomer" required></select>
+
+    <label>Type:</label>
     <select id="paymentType" required>
       <option value="Payment">Payment</option>
       <option value="Receipt">Receipt</option>
     </select>
+
+    <label>Amount:</label>
     <input type="number" id="paymentAmount" placeholder="Amount" required>
+
     <button type="submit">Add Entry</button>
   </form>
+
+  <h3>Payment & Receipt Records</h3>
   <table id="paymentsTable">
-    <thead><tr><th>Date</th><th>Customer</th><th>Type</th><th>Amount</th></tr></thead>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Customer</th>
+        <th>Type</th>
+        <th>Amount</th>
+      </tr>
+    </thead>
     <tbody></tbody>
   </table>
 </section>
@@ -242,6 +257,7 @@ function showLedger() {
 
   let customer = customers.find(c => c.name === name);
   let balance = customer ? customer.openingBalance : 0;
+
   if (balance) {
     const row = document.createElement("tr");
     row.innerHTML = `<td>-</td><td>Opening</td><td>Opening Balance</td><td>${balance.toFixed(2)}</td><td></td><td>${balance.toFixed(2)}</td>`;
@@ -250,12 +266,16 @@ function showLedger() {
 
   let transactions = [];
 
+  // Sales = debit
   sales.forEach(s => { if (s.customer === name) transactions.push({ date: s.date, type: "Sale", details: s.product, debit: s.total, credit: 0 }); });
+
+  // Payments & Receipts always linked to customer
   payments.forEach(p => { if (p.customer === name) {
-    if (p.type === "Payment") transactions.push({ date: p.date, type: "Payment", details: "-", debit: 0, credit: p.amount });
-    else transactions.push({ date: p.date, type: "Receipt", details: "-", debit: p.amount, credit: 0 });
+    if (p.type === "Payment") transactions.push({ date: p.date, type: "Payment", details: "Customer Payment", debit: 0, credit: p.amount });
+    else transactions.push({ date: p.date, type: "Receipt", details: "Customer Receipt", debit: p.amount, credit: 0 });
   }});
 
+  // Sort by date
   transactions.sort((a,b)=> new Date(a.date)-new Date(b.date));
   transactions.forEach(t => {
     balance += t.debit - t.credit;
