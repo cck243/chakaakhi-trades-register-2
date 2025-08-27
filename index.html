@@ -449,102 +449,58 @@ function renderPurchases({products,suppliers,purchases}){
   refreshList();
 }
 
-<!-- Payments & Receipts Section -->
-<section id="payments">
-  <h2>Payments & Receipts</h2>
-  <form id="paymentForm">
-    <label for="paymentCustomer">Customer:</label>
-    <select id="paymentCustomer" required></select>
-
-    <label for="paymentType">Type:</label>
-    <select id="paymentType" required>
-      <option value="Payment">Payment</option>
-      <option value="Receipt">Receipt</option>
-    </select>
-
-    <label for="paymentAmount">Amount:</label>
-    <input type="number" id="paymentAmount" required step="0.01" />
-
-    <button type="submit">Add Entry</button>
-  </form>
-
-  <h3>Payment & Receipt Records</h3>
-  <table border="1" id="paymentsTable">
-    <thead>
-      <tr>
-        <th>Date</th>
-        <th>Customer</th>
-        <th>Payment</th>
-        <th>Receipt</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-</section>
-
-<script>
-  // Load data from localStorage
-  let customers = JSON.parse(localStorage.getItem("customers")) || [];
-  let payments = JSON.parse(localStorage.getItem("payments")) || [];
-
-  // Fill customer dropdown
-  function loadCustomers() {
-    const select = document.getElementById("paymentCustomer");
-    select.innerHTML = "";
-    customers.forEach(cust => {
-      const option = document.createElement("option");
-      option.value = cust.name;
-      option.textContent = cust.name;
-      select.appendChild(option);
-    });
-  }
-
-  // Render payments table with separate Payment and Receipt columns
-  function renderPayments() {
-    const tbody = document.querySelector("#paymentsTable tbody");
-    tbody.innerHTML = "";
-
-    payments.forEach(p => {
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${p.date}</td>
-        <td>${p.customer}</td>
-        <td>${p.type === "Payment" ? p.amount.toFixed(2) : ""}</td>
-        <td>${p.type === "Receipt" ? p.amount.toFixed(2) : ""}</td>
-      `;
-      tbody.appendChild(row);
-    });
-  }
-
-  // Handle form submit
-  document.getElementById("paymentForm").addEventListener("submit", e => {
-    e.preventDefault();
-    const customer = document.getElementById("paymentCustomer").value;
-    const type = document.getElementById("paymentType").value;
-    const amount = parseFloat(document.getElementById("paymentAmount").value);
-
-    if (isNaN(amount) || amount <= 0) {
-      alert("Please enter a valid amount.");
-      return;
+/* ---------- PAYMENTS & RECEIPTS ---------- */
+function renderPayments({payments,sales,purchases,customers,suppliers}){
+  main.innerHTML = `
+    <h2>Payments & Receipts</h2>
+    <div class="card">
+      <div class="row">
+        <div style="flex:1"><label>Type</label><select id="pt-type"><option value="receipt">Receipt (Customer)</option><option value="payment">Payment (Supplier)</option></select></div>
+        <div style="flex:2"><label>Reference</label><select id="pt-ref"></select></div>
+        <div style="flex:1"><label>Date</label><input id="pt-date" type="date" value="${today()}" /></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div style="flex:1"><label>Amount</label><input id="pt-amt" type="number" /></div>
+        <div style="flex:1"><label>Method</label><input id="pt-method" placeholder="Cash/Bank/UPI" /></div>
+        <div style="display:flex;align-items:end"><button id="pt-save" class="btn primary">Record</button></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">All Payments</h3>
+      <table><thead><tr><th>Date</th><th>Type</th><th>Ref</th><th class="right">Amount</th><th>Method</th></tr></thead><tbody id="pt-tbody"></tbody></table>
+    </div>
+  `;
+  const refSel = document.getElementById('pt-ref');
+  function populateRefs(){
+    const type = document.getElementById('pt-type').value;
+    refSel.innerHTML = '';
+    if(type==='receipt'){
+      const s = load('sales');
+      s.forEach(inv => { const due = (inv.total||0) - (inv.paid||0); refSel.insertAdjacentHTML('beforeend', `<option value="sale:${inv.id}">${inv.invoice} — Due ₹ ${fmt(due)}</option>`); });
+    } else {
+      const p = load('purchases');
+      p.forEach(inv => { const due = (inv.total||0) - (inv.paid||0); refSel.insertAdjacentHTML('beforeend', `<option value="purchase:${inv.id}">${inv.bill} — Due ₹ ${fmt(due)}</option>`); });
     }
+  }
+  document.getElementById('pt-type').onchange = populateRefs;
+  populateRefs();
 
-    const entry = {
-      date: new Date().toLocaleDateString(),
-      customer,
-      type,
-      amount
-    };
+  document.getElementById('pt-save').onclick = ()=>{
+    const ref = document.getElementById('pt-ref').value || null;
+    const parts = ref ? ref.split(':') : [null,null];
+    const pay = { id: uid('pay'), type: document.getElementById('pt-type').value === 'receipt' ? 'receipt' : 'payment', refType: parts[0], refId: parts[1], date: document.getElementById('pt-date').value, amount: Number(document.getElementById('pt-amt').value||0), method: document.getElementById('pt-method').value||'' };
+    if(!pay.amount || pay.amount<=0){ alert('Enter amount'); return; }
+    const arr = load('payments'); arr.unshift(pay); save('payments',arr);
+    // attach
+    if(pay.refType==='sale'){ const sales = load('sales'); const s = sales.find(x=>x.id===pay.refId); if(s){ s.paid = Number(s.paid||0) + pay.amount; s.due = Number(s.total||0) - s.paid; save('sales', sales); } }
+    if(pay.refType==='purchase'){ const ps = load('purchases'); const p = ps.find(x=>x.id===pay.refId); if(p){ p.paid = Number(p.paid||0) + pay.amount; p.due = Number(p.total||0) - p.paid; save('purchases', ps); } }
+    alert('Payment recorded'); render('payments');
+  };
 
-    payments.push(entry);
-    localStorage.setItem("payments", JSON.stringify(payments));
-    renderPayments();
-    e.target.reset();
-  });
-
-  // Initial load
-  loadCustomers();
-  renderPayments();
-</script>
+  const tb = document.getElementById('pt-tbody');
+  function refresh(){ const arr = load('payments'); tb.innerHTML = arr.map(p=>{ const refLabel = p.refType==='sale' ? (load('sales').find(s=>s.id===p.refId)||{}).invoice : (p.refType==='purchase' ? (load('purchases').find(s=>s.id===p.refId)||{}).bill : '—'); return `<tr><td>${p.date}</td><td>${p.type}</td><td>${refLabel||''}</td><td class="right">₹ ${fmt(p.amount)}</td><td>${p.method||''}</td></tr>`; }).join(''); }
+  refresh();
+}
 
 /* ---------- Reports / Export / Import ---------- */
 function renderReports({products,customers,suppliers,sales,purchases,payments}){
